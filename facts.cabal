@@ -26,6 +26,8 @@ flag dev
 
 library
   build-depends:      base             >= 4.9 && < 5.0
+                    , exceptions       >= 0.6 && < 0.11
+                    , mtl              >= 2.0 && < 3.0
   exposed-modules:    Data.Refined
   if flag(dev)
     ghc-options:      -Wall -Werror -Wcompat

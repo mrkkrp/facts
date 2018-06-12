@@ -1,9 +1,11 @@
 {-# LANGUAGE AllowAmbiguousTypes    #-}
 {-# LANGUAGE DataKinds              #-}
 {-# LANGUAGE DeriveGeneric          #-}
+{-# LANGUAGE FlexibleContexts       #-}
 {-# LANGUAGE FlexibleInstances      #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE MultiParamTypeClasses  #-}
+{-# LANGUAGE PolyKinds              #-}
 {-# LANGUAGE ScopedTypeVariables    #-}
 {-# LANGUAGE TypeApplications       #-}
 {-# LANGUAGE TypeFamilies           #-}
@@ -16,11 +18,15 @@ module Data.Refined
   )
 where
 
+import Control.Monad.Catch (MonadThrow (..))
+import Control.Monad.Except (MonadError (..))
+import Control.Monad.Fail (MonadFail (..))
 import Data.Coerce
 import Data.Either (fromRight)
 import Data.Kind
 import Data.Proxy
 import GHC.Generics
+import GHC.Stack
 import GHC.TypeLits
 
 ----------------------------------------------------------------------------
@@ -39,7 +45,8 @@ type family AddProp (as :: [*]) (a :: *) :: [*] where
 
 type family AddPropC (o :: Ordering) (a :: *) (b :: *) (as :: [*]) :: [*] where
   AddPropC 'LT a b as = a ': b ': as
-  AddPropC 'EQ a b as = a ': as
+  AddPropC 'EQ a a as = a ': as
+  AddPropC 'EQ a b as = a ': b ': as
   AddPropC 'GT a b as = b ': AddProp as a
 
 type family HasProp (ps :: [*]) (a :: *) :: Constraint where
@@ -61,17 +68,27 @@ type family RemProp (ps :: [*]) (p :: *) :: [*] where
   RemProp (p ': as) p = as
   RemProp (a ': as) p = a ': RemProp as p
 
+type family All (c :: k -> Constraint) (xs :: [k]) :: Constraint where
+  All c '[] = ()
+  All c (x ': xs) = (c x, All c xs)
+
 ----------------------------------------------------------------------------
 -- Properties
 
-class Prop a p where
+class Generic p => Prop a p where
 
-  type PropProjection p :: *
+  type PropProjection a p :: *
 
-  checkProp :: Proxy p -> a -> Either String (PropProjection p)
+  checkProp :: Proxy p -> a -> Either String (PropProjection a p)
 
-  -- TODO for efficiency it may make sense to add a special method that only
-  -- does checking but not conversion
+class (Prop a p, Prop b q) => Prop' a b p q where
+
+  transProp :: (ps `HasProp` p)
+    => Proxy p
+    -> Proxy q
+    -> (a -> b)
+    -> Refined ps a
+    -> Refined '[q] b
 
 ----------------------------------------------------------------------------
 -- Refined data and its construction
@@ -81,15 +98,47 @@ newtype Refined (ps :: [*]) a = Refined a
 refined :: a -> Refined '[] a
 refined = Refined
 
+unrefined :: Refined ps a -> a
+unrefined (Refined a) = a
+
 data RefinedException = RefinedException
+
+-- GHC.Stack
 
 ----------------------------------------------------------------------------
 -- Assuming facts
 
+assumeProps
+  :: forall qs ps a. (All (Prop a) qs)
+  => Refined ps a
+  -> Refined (ps `AddProps` qs) a
+assumeProps = undefined
+
 -- TODO unsafe stuff, should fail immediately and show stack traces
 
 ----------------------------------------------------------------------------
--- Proving facts
+-- Establishing facts empirically
+
+estPropsThrow
+  :: forall qs ps m a. (All (Prop a) qs, MonadThrow m)
+  => Refined ps a
+  -> m (Refined (ps `AddProps` qs) a)
+estPropsThrow = undefined
+
+estPropsFail
+  :: forall qs ps m a. (All (Prop a) qs, MonadFail m)
+  => Refined ps a
+  -> m (Refined (ps `AddProps` qs) a)
+estPropsFail = undefined
+
+estPropsError
+  :: forall qs ps m a. (All (Prop a) qs, MonadError RefinedException m)
+  => Refined ps a
+  -> m (Refined (ps `AddProps` qs) a)
+estPropsError = undefined
+
+-- estPropsTH :: Q Exp
+-- estPropsTH = undefined
 
 -- TODO try to add stack traces
 
@@ -98,9 +147,15 @@ data RefinedException = RefinedException
 ----------------------------------------------------------------------------
 -- Deducing facts
 
-class Axiom (name :: Symbol) (qs :: [*]) (p :: *) | name -> qs p where
+data V (a :: k)
 
-applyAxiom :: forall name p qs ps a. (Axiom name qs p, ps `HasProps` qs)
+-- Quantified constraints would be nice here...
+class Axiom (name :: Symbol) (vs :: [*]) (qs :: [*]) (p :: *) | name vs -> qs p
+
+-- instance {-# OVERLAPPABLE #-} Axiom name vs qs p
+
+applyAxiom
+  :: forall name vs p qs ps a. (Prop a p, Axiom name vs qs p, ps `HasProps` qs)
   => Refined ps a
   -> Refined (ps `AddProp` p) a
 applyAxiom = coerce
@@ -120,15 +175,10 @@ forgetProp = coerce
 
 projectRefined :: forall p ps a. (Prop a p, ps `HasProp` p)
   => Refined ps a
-  -> PropProjection p
+  -> PropProjection a p
 projectRefined (Refined a) =
   fromRight (error "a property has been falsified")
             (checkProp (Proxy :: Proxy p) a)
-
-----------------------------------------------------------------------------
--- Other TODO
-
--- TH helpers for compile-time validation
 
 ----------------------------------------------------------------------------
 -- Playground
@@ -138,18 +188,26 @@ data GooProp deriving (Generic)
 data EeeProp deriving (Generic)
 
 instance Prop Int FooProp where
-  type PropProjection FooProp = Int
+  type PropProjection Int FooProp = Int
   checkProp Proxy i = Right 10
 
-r :: Refined '[FooProp] Int
-r = coerce (5 :: Int)
+instance Prop Int GooProp where
+  type PropProjection Int GooProp = Int
+  checkProp Proxy i = Right 20
 
-instance Axiom "bob" '[FooProp] GooProp
+data GreaterThan (n :: Nat) deriving (Generic)
 
--- TODO Error messages absolutely suck
+instance KnownNat n => Prop Int (GreaterThan n) where
+  type PropProjection Int (GreaterThan n) = Int
+  checkProp Proxy i =
+    if i > fromIntegral (natVal (Proxy :: Proxy n))
+      then Right i
+      else Left "Not your day"
 
-rrr :: Refined '[FooProp, GooProp] Int
-rrr = applyAxiom @"bob" r
+instance CmpNat n m ~ GT => Axiom "weaken_gt" '[V n, V m] '[GreaterThan n] (GreaterThan m)
 
--- projected :: Int
--- projected = projectRefined @FooProp rrr
+r :: Refined '[GreaterThan 5] Int
+r = assumeProps @'[GreaterThan 5] (refined 10)
+
+rrr :: Refined '[GreaterThan 3, GreaterThan 5] Int
+rrr = applyAxiom @"weaken_gt" @'[V 5, V 3] r
