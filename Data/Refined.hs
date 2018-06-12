@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds              #-}
 {-# LANGUAGE DeriveGeneric          #-}
 {-# LANGUAGE MultiParamTypeClasses  #-}
+{-# LANGUAGE ScopedTypeVariables    #-}
 {-# LANGUAGE TypeFamilies           #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE TypeOperators          #-}
@@ -38,7 +39,8 @@ type family AddPropC (o :: Ordering) (a :: *) (b :: *) (as :: [*]) :: [*] where
   AddPropC 'GT a b as = b ': AddProp a as
 
 type family HasProp (a :: *) (ps :: [*]) :: Constraint where
-  HasProp a '[] = TypeError ('ShowType a ':<>: 'Text " is not proven property")
+  HasProp a '[] = TypeError
+    ('ShowType a ':<>: 'Text " is not a proven property")
 
 type family AddProps (as :: [*]) (ps :: [*]) :: [*] where
   AddProps '[] ps = ps
@@ -63,15 +65,15 @@ class Prop a p where
 ----------------------------------------------------------------------------
 -- Refined data and its construction
 
-newtype Refined (ps :: [*]) a = Refined a
+newtype Refined (p :: *) (ps :: [*]) a = Refined a
 
-assumeNothing :: a -> Refined '[] a
+assumeNothing :: a -> Refined p '[] a
 assumeNothing = undefined
 
 ----------------------------------------------------------------------------
 -- Assuming facts
 
--- TODO unsafe stuff, should show stack traces
+-- TODO unsafe stuff, should fail immediately and show stack traces
 
 ----------------------------------------------------------------------------
 -- Proving facts
@@ -80,22 +82,18 @@ assumeNothing = undefined
 
 -- TODO via MonadThrow and MonadFail, and with Either
 
--- proveP
-
 ----------------------------------------------------------------------------
 -- Deducing facts
 
-deducePremises :: Prop a p
-  => Proxy p
-  -> Refined ps a
-  -> Refined (AddProps (PropPremises p) ps) a
-deducePremises Proxy = coerce
+deduce :: (Prop a p, HasProp p ps)
+  => Refined p ps a
+  -> Refined p' (AddProps (PropPremises p) ps) a
+deduce = coerce
 
-deduceFact :: Prop a p
-  => Proxy p
-  -> Refined ps a
-  -> Refined (AddProp p ps) a
-deduceFact Proxy = coerce
+conclude :: (Prop a p, HasProps (PropPremises p) ps)
+  => Refined p ps a
+  -> Refined p' (AddProp p ps) a
+conclude = coerce
 
 ----------------------------------------------------------------------------
 -- Creating APIs that deal with properties
@@ -107,12 +105,12 @@ type family HasProps (as :: [*]) (ps :: [*]) :: Constraint where
 ----------------------------------------------------------------------------
 -- Projections
 
-projectRefined :: (Prop a p, HasProp p ps)
-  => Proxy p
-  -> Refined ps a
+projectRefined :: forall p ps a. (Prop a p, HasProp p ps)
+  => Refined p ps a
   -> PropProjection p
-projectRefined p (Refined a) =
-  fromRight (error "a property has been falsified") (checkProp p a)
+projectRefined (Refined a) =
+  fromRight (error "a property has been falsified")
+            (checkProp (Proxy :: Proxy p) a)
 
 ----------------------------------------------------------------------------
 -- Other TODO
