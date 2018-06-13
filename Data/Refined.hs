@@ -1,3 +1,15 @@
+-- |
+-- Module      :  Data.Refined
+-- Copyright   :  © 2018 Mark Karpov
+-- License     :  BSD 3 clause
+--
+-- Maintainer  :  Mark Karpov <markkarpov92@gmail.com>
+-- Stability   :  experimental
+-- Portability :  portable
+--
+-- The module introduces a framework that allow us to manipulate refined
+-- types.
+
 {-# LANGUAGE AllowAmbiguousTypes    #-}
 {-# LANGUAGE DataKinds              #-}
 {-# LANGUAGE DeriveGeneric          #-}
@@ -9,13 +21,34 @@
 {-# LANGUAGE ScopedTypeVariables    #-}
 {-# LANGUAGE TypeApplications       #-}
 {-# LANGUAGE TypeFamilies           #-}
-{-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE TypeOperators          #-}
 {-# LANGUAGE UndecidableInstances   #-}
 
 module Data.Refined
-  (
-  )
+  ( -- * 'Refined' types
+    Refined
+  , refined
+  , unrefined
+    -- * Properties
+  , Prop (..)
+  , AddProp
+  , AddProps
+  , HasProp
+  , HasProps
+    -- * Projections
+  , projectRefined
+    -- * Establishing properties
+  , assumeProps
+  , estPropsThrow
+  , estPropsFail
+  , estPropsError
+  , estPropsTH
+  , RefinedException (..)
+    -- * Deducing properties
+  , Axiom
+  , V
+  , applyAxiom
+  , selectProps )
 where
 
 import Control.Monad.Catch (MonadThrow (..))
@@ -28,9 +61,27 @@ import Data.Proxy
 import GHC.Generics
 import GHC.Stack
 import GHC.TypeLits
+import Language.Haskell.TH
 
 ----------------------------------------------------------------------------
--- Set on type level
+-- Refined types
+
+newtype Refined (ps :: [*]) a = Refined a
+
+refined :: a -> Refined '[] a
+refined = Refined
+
+unrefined :: Refined ps a -> a
+unrefined (Refined a) = a
+
+----------------------------------------------------------------------------
+-- Properties
+
+class (Show a, Generic p) => Prop a p where
+
+  type PropProjection a p :: *
+
+  checkProp :: Proxy p -> a -> Either String (PropProjection a p)
 
 type family PropName (p :: *) :: Symbol where
   PropName p = PropName' (Rep p)
@@ -38,6 +89,8 @@ type family PropName (p :: *) :: Symbol where
 type family PropName' (p :: * -> *) :: Symbol where
   PropName' (D1 ('MetaData n m p nt) V1) =
     p `AppendSymbol` "-" `AppendSymbol` m `AppendSymbol` "-" `AppendSymbol` n
+  PropName' p = TypeError
+    ('Text "Types that represent properties should not have data constructors")
 
 type family AddProp (as :: [*]) (a :: *) :: [*] where
   AddProp '[] a = '[a]
@@ -63,61 +116,28 @@ type family HasProps (ps :: [*]) (as :: [*]) :: Constraint where
   HasProps ps '[] = ()
   HasProps ps (a ': as) = (HasProp ps a, HasProps ps as)
 
-type family RemProp (ps :: [*]) (p :: *) :: [*] where
-  RemProp '[] p = '[]
-  RemProp (p ': as) p = as
-  RemProp (a ': as) p = a ': RemProp as p
-
 type family All (c :: k -> Constraint) (xs :: [k]) :: Constraint where
   All c '[] = ()
   All c (x ': xs) = (c x, All c xs)
 
 ----------------------------------------------------------------------------
--- Properties
+-- Projections
 
-class Generic p => Prop a p where
-
-  type PropProjection a p :: *
-
-  checkProp :: Proxy p -> a -> Either String (PropProjection a p)
-
-class (Prop a p, Prop b q) => Prop' a b p q where
-
-  transProp :: (ps `HasProp` p)
-    => Proxy p
-    -> Proxy q
-    -> (a -> b)
-    -> Refined ps a
-    -> Refined '[q] b
+projectRefined :: forall p ps a. (Prop a p, ps `HasProp` p)
+  => Refined ps a
+  -> PropProjection a p
+projectRefined (Refined a) =
+  fromRight (error "a property has been falsified")
+            (checkProp (Proxy :: Proxy p) a)
 
 ----------------------------------------------------------------------------
--- Refined data and its construction
-
-newtype Refined (ps :: [*]) a = Refined a
-
-refined :: a -> Refined '[] a
-refined = Refined
-
-unrefined :: Refined ps a -> a
-unrefined (Refined a) = a
-
-data RefinedException = RefinedException
-
--- GHC.Stack
-
-----------------------------------------------------------------------------
--- Assuming facts
+-- Establishing properties
 
 assumeProps
   :: forall qs ps a. (All (Prop a) qs)
   => Refined ps a
   -> Refined (ps `AddProps` qs) a
 assumeProps = undefined
-
--- TODO unsafe stuff, should fail immediately and show stack traces
-
-----------------------------------------------------------------------------
--- Establishing facts empirically
 
 estPropsThrow
   :: forall qs ps m a. (All (Prop a) qs, MonadThrow m)
@@ -137,22 +157,27 @@ estPropsError
   -> m (Refined (ps `AddProps` qs) a)
 estPropsError = undefined
 
--- estPropsTH :: Q Exp
--- estPropsTH = undefined
+estPropsTH :: Q Exp
+estPropsTH = undefined
 
 -- TODO try to add stack traces
 
 -- TODO via MonadThrow and MonadFail, and with Either
 
+data RefinedException = RefinedException
+  -- call stack
+  -- collection of error messages as Strings
+  -- property that is violated (via generics again)
+  -- input that is problematic (Show'ed)
+  -- type of logical failure: wrong assumption, unsatisfied condition,
+  -- failure to obtain a projection (bad!)
+
 ----------------------------------------------------------------------------
--- Deducing facts
+-- Deducing properties
 
 data V (a :: k)
 
--- Quantified constraints would be nice here...
 class Axiom (name :: Symbol) (vs :: [*]) (qs :: [*]) (p :: *) | name vs -> qs p
-
--- instance {-# OVERLAPPABLE #-} Axiom name vs qs p
 
 applyAxiom
   :: forall name vs p qs ps a. (Prop a p, Axiom name vs qs p, ps `HasProps` qs)
@@ -164,21 +189,6 @@ selectProps :: forall qs ps a. (ps `HasProps` qs)
   => Refined ps a
   -> Refined qs a
 selectProps = coerce
-
-forgetProp :: forall p ps a. (ps `HasProp` p)
-  => Refined ps a
-  -> Refined (ps `RemProp` p) a
-forgetProp = coerce
-
-----------------------------------------------------------------------------
--- Projections
-
-projectRefined :: forall p ps a. (Prop a p, ps `HasProp` p)
-  => Refined ps a
-  -> PropProjection a p
-projectRefined (Refined a) =
-  fromRight (error "a property has been falsified")
-            (checkProp (Proxy :: Proxy p) a)
 
 ----------------------------------------------------------------------------
 -- Playground
