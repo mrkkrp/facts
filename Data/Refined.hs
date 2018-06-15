@@ -7,18 +7,27 @@
 -- Stability   :  experimental
 -- Portability :  portable
 --
--- The module introduces a framework that allow us to manipulate refined
--- types.
+-- The module introduces a framework that allows us to manipulate refined
+-- types. The documentation is meant to be read as an article from top to
+-- bottom, as it serves as a manual and gradually introduces various
+-- features of the library.
+--
+-- The blog post may also be of interest:
+--
+-- <https://markkarpov.com/post/smart-constructors-that-cannot-fail.html>
 
 {-# LANGUAGE AllowAmbiguousTypes    #-}
 {-# LANGUAGE DataKinds              #-}
+{-# LANGUAGE DeriveDataTypeable     #-}
 {-# LANGUAGE DeriveGeneric          #-}
 {-# LANGUAGE FlexibleContexts       #-}
 {-# LANGUAGE FlexibleInstances      #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE MultiParamTypeClasses  #-}
 {-# LANGUAGE PolyKinds              #-}
+{-# LANGUAGE RoleAnnotations        #-}
 {-# LANGUAGE ScopedTypeVariables    #-}
+{-# LANGUAGE TemplateHaskell        #-}
 {-# LANGUAGE TypeApplications       #-}
 {-# LANGUAGE TypeFamilies           #-}
 {-# LANGUAGE TypeOperators          #-}
@@ -29,14 +38,14 @@ module Data.Refined
     Refined
   , refined
   , unrefined
-    -- * Properties
+    -- * 'Prop'erties
   , Prop (..)
+  , IdProp
   , AddProp
   , AddProps
   , HasProp
   , HasProps
-    -- * Projections
-  , projectRefined
+  , ProjectionProps
     -- * Establishing properties
   , assumeProps
   , estPropsThrow
@@ -44,6 +53,9 @@ module Data.Refined
   , estPropsError
   , estPropsTH
   , RefinedException (..)
+    -- * Following properties
+  , Via
+  , followProp
     -- * Deducing properties
   , Axiom
   , V
@@ -51,25 +63,41 @@ module Data.Refined
   , selectProps )
 where
 
-import Control.Monad.Catch (MonadThrow (..))
+import Control.Monad.Catch (Exception (..), MonadThrow (..))
 import Control.Monad.Except (MonadError (..))
 import Control.Monad.Fail (MonadFail (..))
 import Data.Coerce
-import Data.Either (fromRight)
 import Data.Kind
+import Data.List.NonEmpty (NonEmpty (..))
 import Data.Proxy
+import Data.Typeable (Typeable)
 import GHC.Generics
 import GHC.Stack
 import GHC.TypeLits
-import Language.Haskell.TH
+import qualified Language.Haskell.TH.Syntax as TH
 
 ----------------------------------------------------------------------------
 -- Refined types
 
+-- | @'Refined' ps a@ is a wrapper around @a@ proving that it has properties
+-- @ps@. @ps@ is a type-level list containing /properties/, that is, void
+-- data types symbolizing various concepts, see 'Prop'.
+
 newtype Refined (ps :: [*]) a = Refined a
+  deriving (Eq, Ord, Show, Typeable)
+
+type role Refined phantom representational
+
+instance TH.Lift a => TH.Lift (Refined ps a) where
+  lift (Refined a) = [| Refined a |]
+
+-- | 'refined' creates a refined type with no associated properties. We
+-- don't demand anything, and so quite conveniently this is a pure function.
 
 refined :: a -> Refined '[] a
 refined = Refined
+
+-- | We can erase information we know by using 'unrefined'.
 
 unrefined :: Refined ps a -> a
 unrefined (Refined a) = a
@@ -77,14 +105,82 @@ unrefined (Refined a) = a
 ----------------------------------------------------------------------------
 -- Properties
 
+-- | @'Prop' a p@ is a type class for @a@ things that can have @p@ property.
+-- Properties are morphisms in the category of refined types.
+
 class (Show a, Generic p) => Prop a p where
+
+  -- | If we consider property @p@ as a morphism, then while @a@ is its
+  -- domain, @'PropProjection' a p@ is the codomain.
+  --
+  -- We could have a property telling that a @Text@ value is not empty,
+  -- then:
+  --
+  -- > type PropProjection Text NotEmpty = NonEmptyText -- e.g. newtype
+  --
+  -- We could do the same for linked lists:
+  --
+  -- > type PropProjection [Char] NotEmpty = NonEmpty Char
+  --
+  -- This connects the 'Data.List.NonEmpty.NonEmpty' type, normally
+  -- obtainable via the smart constructor 'Data.List.NonEmpty.nonEmpty' to
+  -- our list. Once we have proven that our list is @NotEmpty@, we'll be
+  -- able to get @NonEmpty@ projection purely without possibility of
+  -- failure.
+  --
+  -- We could have a property called @Length@ and in that case we could say:
+  --
+  -- > type PropProjection Text Length = Int
+  --
+  -- We could also have a property @IsURI@ telling if a @Text@ value is a
+  -- valid @URI@. In that case we could say (assuming that @URI@ is such a
+  -- type that can represent only valid URIs):
+  --
+  -- > type PropProjection Text IsURI = URI
 
   type PropProjection a p :: *
 
+  -- | 'checkProp' is the way to check if @a@ has property @p@. It either
+  -- has it, and then we obtain @'PropProjection' a p@ or it doesn't have
+  -- such a property, in which case a reason “why” is returned as a
+  -- 'String'.
+
   checkProp :: Proxy p -> a -> Either String (PropProjection a p)
 
+-- | Identity property. This is the identity in the category of refined
+-- types.
+
+data IdProp deriving Generic
+
+-- | Every type has the identity property which allows to treat that type as
+-- well… that type.
+
+instance Show a => Prop a IdProp where
+  type PropProjection a IdProp = a
+  checkProp Proxy = Right
+
+-- | We always can assume that a value has 'IdProp'.
+
+instance Axiom "id_prop" '[] '[] IdProp
+
+-- | An existing property can be pre-composed with 'IdProp'.
+
+instance Axiom "id_prop_pre" '[a] '[a] (a `Via` IdProp)
+
+-- | An existing prperty can be post-composed with 'IdProp'.
+
+instance Axiom "id_prop_post" '[a] '[a] (IdProp `Via` a)
+
+-- | Obtain a name of property type as a type of the kind 'Symbol'.
+
 type family PropName (p :: *) :: Symbol where
+  PropName (a `Via` b) = "*"
+    `AppendSymbol` PropName' (Rep a)
+    `AppendSymbol` "*via*"
+    `AppendSymbol` PropName' (Rep b)
   PropName p = PropName' (Rep p)
+
+-- | A helper for 'PropName'.
 
 type family PropName' (p :: * -> *) :: Symbol where
   PropName' (D1 ('MetaData n m p nt) V1) =
@@ -92,9 +188,13 @@ type family PropName' (p :: * -> *) :: Symbol where
   PropName' p = TypeError
     ('Text "Types that represent properties should not have data constructors")
 
-type family AddProp (as :: [*]) (a :: *) :: [*] where
-  AddProp '[] a = '[a]
-  AddProp (b ': as) a = AddPropC (CmpSymbol (PropName a) (PropName b)) a b as
+-- | Add a property @p@ to the type-level set @ps@. If a property is already
+-- in the set, nothing will happen. The order of items in the set is
+-- (mostly) deterministic.
+
+type family AddProp (ps :: [*]) (p :: *) :: [*] where
+  AddProp '[] p = '[p]
+  AddProp (n ': ps) p = AddPropC (CmpSymbol (PropName p) (PropName n)) p n ps
 
 type family AddPropC (o :: Ordering) (a :: *) (b :: *) (as :: [*]) :: [*] where
   AddPropC 'LT a b as = a ': b ': as
@@ -102,36 +202,46 @@ type family AddPropC (o :: Ordering) (a :: *) (b :: *) (as :: [*]) :: [*] where
   AddPropC 'EQ a b as = a ': b ': as
   AddPropC 'GT a b as = b ': AddProp as a
 
-type family HasProp (ps :: [*]) (a :: *) :: Constraint where
-  HasProp '[] a = TypeError
-    ('ShowType a ':<>: 'Text " is not a proven property")
-  HasProp (a ': as) a = ()
-  HasProp (b ': as) a = HasProp as a
+-- | The resulting constraint will be satisfied iff the collection of
+-- properties @ps@ has the property @p@ is it.
+
+type family HasProp (ps :: [*]) (p :: *) :: Constraint where
+  HasProp '[] p = TypeError
+    ('ShowType p ':<>: 'Text " is not a proven property")
+  HasProp (p ': ps) p = ()
+  HasProp (b ': ps) p = HasProp ps p
+
+-- | Like 'AppProp' but for many properties at once.
 
 type family AddProps (ps :: [*]) (as :: [*]) :: [*] where
   AddProps ps '[] = ps
   AddProps ps (a ': as) = AddProps (AddProp ps a) as
 
+-- | Like 'HasProp' but for many properties at once.
+
 type family HasProps (ps :: [*]) (as :: [*]) :: Constraint where
   HasProps ps '[] = ()
   HasProps ps (a ': as) = (HasProp ps a, HasProps ps as)
+
+-- | @'All' c xs@ is satisfied when @c@ is satisfied for every element in
+-- @xs@.
 
 type family All (c :: k -> Constraint) (xs :: [k]) :: Constraint where
   All c '[] = ()
   All c (x ': xs) = (c x, All c xs)
 
-----------------------------------------------------------------------------
--- Projections
+-- | Construct a list of properties from @ps@ for projection obtained via
+-- @p@.
 
-projectRefined :: forall p ps a. (Prop a p, ps `HasProp` p)
-  => Refined ps a
-  -> PropProjection a p
-projectRefined (Refined a) =
-  fromRight (error "a property has been falsified")
-            (checkProp (Proxy :: Proxy p) a)
+type family ProjectionProps (ps :: [*]) (p :: *)  :: [*] where
+  ProjectionProps '[] p = '[]
+  ProjectionProps ((t `Via` p) ': ps) p = t ': ProjectionProps ps p
+  ProjectionProps (x ': ps) p = ProjectionProps ps p
 
 ----------------------------------------------------------------------------
 -- Establishing properties
+
+-- |
 
 assumeProps
   :: forall qs ps a. (All (Prop a) qs)
@@ -157,33 +267,109 @@ estPropsError
   -> m (Refined (ps `AddProps` qs) a)
 estPropsError = undefined
 
-estPropsTH :: Q Exp
+estPropsTH :: TH.Q TH.Exp
 estPropsTH = undefined
 
--- TODO try to add stack traces
+-- | Probe some properties against a value.
+--
+-- TODO Avoid re-checking for 'Via' things every time, that sucks. Probably
+-- fine for the first release though.
 
--- TODO via MonadThrow and MonadFail, and with Either
+probeProps
+  :: forall qs a. (All (Prop a) qs, HasCallStack)
+  => a
+  -> Maybe (NonEmpty (String, String))
+probeProps x = undefined -- TODO
+
+-- | Exception that is thrown at run time when something
 
 data RefinedException = RefinedException
-  -- call stack
-  -- collection of error messages as Strings
-  -- property that is violated (via generics again)
-  -- input that is problematic (Show'ed)
-  -- type of logical failure: wrong assumption, unsatisfied condition,
-  -- failure to obtain a projection (bad!)
+  { rexpCallStack :: CallStack
+  , rexpValue :: String
+  , rexpIssues :: NonEmpty (String, String)
+  } deriving (Show, Typeable)
+
+instance Exception RefinedException where
+  displayException = undefined -- TODO
+
+----------------------------------------------------------------------------
+-- Following properties
+
+-- | 'Via' is the composition in the category of refined types.
+
+data (t :: *) `Via` (p :: *) deriving Generic
+
+instance (Prop (PropProjection a p) t, Prop a p) => Prop a (t `Via` p) where
+
+  type PropProjection a (t `Via` p) = PropProjection (PropProjection a p) t
+
+  checkProp Proxy a =
+    checkProp (Proxy :: Proxy p) a >>=
+    checkProp (Proxy :: Proxy t)
+
+infixl 5 `Via`
+
+-- | Obtain a projection as a refined value, i.e. follow a morphism created
+-- by a property.
+
+followProp :: forall p ps a. (Prop a p, ps `HasProp` p, HasCallStack)
+  => Refined ps a
+  -> Refined (ProjectionProps ps p) (PropProjection a p)
+followProp (Refined a) =
+  case checkProp (Proxy :: Proxy p) a of
+    Left msg -> error $
+      prettyCallStack callStack ++ "\n" ++
+      show a ++ ": " ++ msg
+    Right x -> Refined x
 
 ----------------------------------------------------------------------------
 -- Deducing properties
 
+-- | A helper wrapper so we have construct heterogeneous type-level lists
+-- with respect to kinds of elements.
+
 data V (a :: k)
 
+-- | An @'Axiom' name vs qs p@ allows to prove property @p@ if properties
+-- @qs@ are already proven. @name@ and arguments @vs@ determine both @qs@
+-- and @p@.
+--
+-- The arguments are necessary sometimes. Imagine you want to write
+-- something as trivial as:
+--
+-- > instance CmpNat n m ~ GT => Axiom "weaken_gt" '[V n, V m] '[GreaterThan n] (GreaterThan m)
+--
+-- Without having @vs@ you'd have a hard time convincing GHC that this could
+-- work.
+--
+-- Another example. Suppose I have two refined types @A@ and @B@ and
+-- properties @PropM@ and @PropN@ such that @PropM@ allows me to go from @A@
+-- to @B@ and @PropN@ allows me to go back to get exactly the same value of
+-- @A@ as before. Now it makes sense that I could arrange things is such a
+-- way that when I'm “back” I can recover any properties that I originally
+-- knew about @A@.
+--
+-- > instance Axiom "preserve" '[p] '[p] (p `Via` PropN `Via` PropM)
+--
+-- Now I can first create as many properties as of the form @p `Via` PropN
+-- `Via` PropM@ then use @PropM@ to go to @B@ with help of 'followProp'.
+-- After that I'll be able to go back to @A@ and my old properties
+-- “preserved” in that way will be with me.
+--
+-- Again, without the argument parameter @vs@ that trick would be
+-- impossible.
+
 class Axiom (name :: Symbol) (vs :: [*]) (qs :: [*]) (p :: *) | name vs -> qs p
+
+-- | Apply 'Axiom' and deduce a new property.
 
 applyAxiom
   :: forall name vs p qs ps a. (Prop a p, Axiom name vs qs p, ps `HasProps` qs)
   => Refined ps a
   -> Refined (ps `AddProp` p) a
 applyAxiom = coerce
+
+-- | Select some properties from known properties.
 
 selectProps :: forall qs ps a. (ps `HasProps` qs)
   => Refined ps a

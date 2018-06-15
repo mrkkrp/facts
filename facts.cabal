@@ -8,10 +8,10 @@ author:               Mark Karpov <markkarpov92@gmail.com>
 maintainer:           Mark Karpov <markkarpov92@gmail.com>
 homepage:             https://github.com/mrkkrp/facts
 bug-reports:          https://github.com/mrkkrp/facts/issues
-category:             Categories
-synopsis:             Description
+category:             Data
+synopsis:             Refined types
 build-type:           Simple
-description:          Description.
+description:          Refined types.
 extra-doc-files:      CHANGELOG.md
                     , README.md
 
