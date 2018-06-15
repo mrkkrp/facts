@@ -383,10 +383,10 @@ data V (a :: k)
 --
 -- > instance Axiom "preserve" '[p] '[p] (p `Via` PropN `Via` PropM)
 --
--- Now I can first create as many properties as of the form @p `Via` PropN
--- `Via` PropM@ then use @PropM@ to go to @B@ with help of 'followProp'.
--- After that I'll be able to go back to @A@ and my old properties
--- “preserved” in that way will be with me.
+-- Now I can first create as many properties as necessary of the form @p
+-- `Via` PropN `Via` PropM@, then use @PropM@ to go to @B@ with help of
+-- 'followProp'. After that I'll be able to go back to @A@ and my old
+-- properties “preserved” in that way will be with me.
 --
 -- Again, without the argument parameter @vs@ that trick would be
 -- impossible.
