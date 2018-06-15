@@ -6,7 +6,16 @@
 [![Stackage LTS](http://stackage.org/package/facts/badge/lts)](http://stackage.org/lts/package/facts)
 [![Build Status](https://travis-ci.org/mrkkrp/facts.svg?branch=master)](https://travis-ci.org/mrkkrp/facts)
 
-An experiment and proof-of-concept. Proper description pending.
+This is a library for working with refined types in Haskell. Please refer to
+the Haddock for more information as I'm still working on how to present the
+ideas in it to people.
+
+## Contribution
+
+Please kindly direct all issues, bugs, and questions to [the GitHub issue
+tracker for this project](https://github.com/mrkkrp/facts/issues).
+
+Pull requests are also welcome and will be reviewed quickly.
 
 ## License
 
