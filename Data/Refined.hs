@@ -11,10 +11,6 @@
 -- types. The documentation is meant to be read as an article from top to
 -- bottom, as it serves as a manual and gradually introduces various
 -- features of the library.
---
--- The blog post may also be of interest:
---
--- <https://markkarpov.com/post/smart-constructors-that-cannot-fail.html>
 
 {-# LANGUAGE AllowAmbiguousTypes    #-}
 {-# LANGUAGE DataKinds              #-}
@@ -116,7 +112,7 @@ class (Show a, Generic p) => Prop a p where
   -- We could have a property telling that a @Text@ value is not empty,
   -- then:
   --
-  -- > type PropProjection Text NotEmpty = NonEmptyText -- e.g. newtype
+  -- > type PropProjection Text NotEmpty = NonEmptyText -- e.g. a newtype
   --
   -- We could do the same for linked lists:
   --
@@ -248,7 +244,7 @@ estPropThrow
   -> m (Refined (ps `AddProp` q) a)
 estPropThrow = either throwM return . probeProp @q
 
--- | Establish a property in a 'MonadFail' instance.
+-- | Establish a property in a 'Fail.MonadFail' instance.
 
 estPropFail
   :: forall q ps m a. ( Prop a q
@@ -297,13 +293,17 @@ probeProp (Refined a) =
       }
     Right _ -> Right (Refined a)
 
--- | Exception that is thrown at run time when something
+-- | Exception that is thrown at run time when a property doesn't hold.
 
 data RefinedException = RefinedException
   { rexpCallStack :: !CallStack
+    -- ^ Location where the check failed
   , rexpValue :: !String
+    -- ^ Value that failed to satisfy a property check
   , rexpPropName :: !String
+    -- ^ Name of the property in question
   , rexpIssue :: !String
+    -- ^ Description of why the property check failed
   } deriving (Show, Typeable)
 
 instance Exception RefinedException where
@@ -319,6 +319,13 @@ instance Exception RefinedException where
 -- Following properties
 
 -- | 'Via' is the composition in the category of refined types.
+--
+-- 'Via' is of great utility as it allows to prove properties about values
+-- of refined types that are obtainable by following a proprety morphism,
+-- not values we currently have. It also allows to state 'Axiom's (see
+-- below) that talk about properties of “connected” types. Without 'Via',
+-- 'Axiom's could only talk about relations between properties of the same
+-- type type.
 
 data (t :: *) `Via` (p :: *) deriving Generic
 
@@ -348,7 +355,7 @@ followProp (Refined a) =
 ----------------------------------------------------------------------------
 -- Deducing properties
 
--- | A helper wrapper so we have construct heterogeneous type-level lists
+-- | A helper wrapper to help us construct heterogeneous type-level lists
 -- with respect to kinds of elements.
 
 data V (a :: k)
