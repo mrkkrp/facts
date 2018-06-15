@@ -25,6 +25,7 @@
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE MultiParamTypeClasses  #-}
 {-# LANGUAGE PolyKinds              #-}
+{-# LANGUAGE RecordWildCards        #-}
 {-# LANGUAGE RoleAnnotations        #-}
 {-# LANGUAGE ScopedTypeVariables    #-}
 {-# LANGUAGE TemplateHaskell        #-}
@@ -47,11 +48,11 @@ module Data.Refined
   , HasProps
   , ProjectionProps
     -- * Establishing properties
-  , assumeProps
-  , estPropsThrow
-  , estPropsFail
-  , estPropsError
-  , estPropsTH
+  , assumeProp
+  , estPropThrow
+  , estPropFail
+  , estPropError
+  , estPropTH
   , RefinedException (..)
     -- * Following properties
   , Via
@@ -65,15 +66,14 @@ where
 
 import Control.Monad.Catch (Exception (..), MonadThrow (..))
 import Control.Monad.Except (MonadError (..))
-import Control.Monad.Fail (MonadFail (..))
 import Data.Coerce
 import Data.Kind
-import Data.List.NonEmpty (NonEmpty (..))
 import Data.Proxy
 import Data.Typeable (Typeable)
 import GHC.Generics
 import GHC.Stack
 import GHC.TypeLits
+import qualified Control.Monad.Fail         as Fail
 import qualified Language.Haskell.TH.Syntax as TH
 
 ----------------------------------------------------------------------------
@@ -213,22 +213,15 @@ type family HasProp (ps :: [*]) (p :: *) :: Constraint where
 
 -- | Like 'AppProp' but for many properties at once.
 
-type family AddProps (ps :: [*]) (as :: [*]) :: [*] where
+type family AddProps (ps :: [*]) (qs :: [*]) :: [*] where
   AddProps ps '[] = ps
-  AddProps ps (a ': as) = AddProps (AddProp ps a) as
+  AddProps ps (q ': qs) = AddProps (AddProp ps q) qs
 
 -- | Like 'HasProp' but for many properties at once.
 
-type family HasProps (ps :: [*]) (as :: [*]) :: Constraint where
+type family HasProps (ps :: [*]) (qs :: [*]) :: Constraint where
   HasProps ps '[] = ()
-  HasProps ps (a ': as) = (HasProp ps a, HasProps ps as)
-
--- | @'All' c xs@ is satisfied when @c@ is satisfied for every element in
--- @xs@.
-
-type family All (c :: k -> Constraint) (xs :: [k]) :: Constraint where
-  All c '[] = ()
-  All c (x ': xs) = (c x, All c xs)
+  HasProps ps (q ': qs) = (HasProp ps q, HasProps ps qs)
 
 -- | Construct a list of properties from @ps@ for projection obtained via
 -- @p@.
@@ -241,56 +234,90 @@ type family ProjectionProps (ps :: [*]) (p :: *)  :: [*] where
 ----------------------------------------------------------------------------
 -- Establishing properties
 
--- |
+-- | Assume a property. This is unsafe and may be a source of bugs. Only use
+-- when you 100% sure that the property indeed holds.
 
-assumeProps
-  :: forall qs ps a. (All (Prop a) qs)
+assumeProp
+  :: forall q ps a. (Prop a q)
   => Refined ps a
-  -> Refined (ps `AddProps` qs) a
-assumeProps = undefined
+  -> Refined (ps `AddProp` q) a
+assumeProp = undefined
 
-estPropsThrow
-  :: forall qs ps m a. (All (Prop a) qs, MonadThrow m)
+-- | Establish a property in 'MonadThrow'.
+
+estPropThrow
+  :: forall q ps m a. ( Prop a q
+                      , KnownSymbol (PropName q)
+                      , MonadThrow m
+                      )
   => Refined ps a
-  -> m (Refined (ps `AddProps` qs) a)
-estPropsThrow = undefined
+  -> m (Refined (ps `AddProp` q) a)
+estPropThrow = either throwM return . probeProp @q
 
-estPropsFail
-  :: forall qs ps m a. (All (Prop a) qs, MonadFail m)
+-- | Establish properties in a 'MonadFail' instance.
+
+estPropFail
+  :: forall q ps m a. ( Prop a q
+                      , KnownSymbol (PropName q)
+                      , Fail.MonadFail m
+                      )
   => Refined ps a
-  -> m (Refined (ps `AddProps` qs) a)
-estPropsFail = undefined
+  -> m (Refined (ps `AddProp` q) a)
+estPropFail = either (Fail.fail . displayException) return . probeProp @q
 
-estPropsError
-  :: forall qs ps m a. (All (Prop a) qs, MonadError RefinedException m)
+-- | Establish properties in a 'MonadError' instance.
+
+estPropError
+  :: forall q ps m a. ( Prop a q
+                      , KnownSymbol (PropName q)
+                      , MonadError RefinedException m
+                      )
   => Refined ps a
-  -> m (Refined (ps `AddProps` qs) a)
-estPropsError = undefined
+  -> m (Refined (ps `AddProp` q) a)
+estPropError = either throwError return . probeProp @q
 
-estPropsTH :: TH.Q TH.Exp
-estPropsTH = undefined
+estPropTH
+  :: forall q ps a. ( Prop a q
+                    , KnownSymbol (PropName q)
+                    , TH.Lift a
+                    )
+  => Refined ps a
+  -> TH.Q TH.Exp
+estPropTH x = estPropFail @q x >>= TH.lift
 
--- | Probe some properties against a value.
---
--- TODO Avoid re-checking for 'Via' things every time, that sucks. Probably
--- fine for the first release though.
+-- | Check if a property holds and return error message if it doesn't.
 
-probeProps
-  :: forall qs a. (All (Prop a) qs, HasCallStack)
-  => a
-  -> Maybe (NonEmpty (String, String))
-probeProps x = undefined -- TODO
+probeProp
+  :: forall q ps a. (Prop a q, KnownSymbol (PropName q))
+  => Refined ps a
+  -> Either RefinedException (Refined (ps `AddProp` q) a)
+probeProp (Refined a) =
+  case checkProp (Proxy :: Proxy q) a of
+    Left issue -> Left RefinedException
+      { rexpCallStack = callStack
+      , rexpValue = show a
+      , rexpPropName = symbolVal (Proxy :: Proxy (PropName q))
+      , rexpIssue = issue
+      }
+    Right _ -> Right (Refined a)
 
 -- | Exception that is thrown at run time when something
 
 data RefinedException = RefinedException
-  { rexpCallStack :: CallStack
-  , rexpValue :: String
-  , rexpIssues :: NonEmpty (String, String)
+  { rexpCallStack :: !CallStack
+  , rexpValue :: !String
+  , rexpPropName :: !String
+  , rexpIssue :: !String
   } deriving (Show, Typeable)
 
 instance Exception RefinedException where
-  displayException = undefined -- TODO
+  displayException RefinedException {..} = unlines
+    [ "RefinedException:"
+    , prettyCallStack rexpCallStack
+    , "value: " ++ rexpValue
+    , "property: " ++ rexpPropName
+    , "issue:" ++ rexpIssue
+    ]
 
 ----------------------------------------------------------------------------
 -- Following properties
@@ -337,7 +364,8 @@ data V (a :: k)
 -- The arguments are necessary sometimes. Imagine you want to write
 -- something as trivial as:
 --
--- > instance CmpNat n m ~ GT => Axiom "weaken_gt" '[V n, V m] '[GreaterThan n] (GreaterThan m)
+-- > instance CmpNat n m ~ GT => Axiom "weaken_gt"
+-- >     '[V n, V m] '[GreaterThan n] (GreaterThan m)
 --
 -- Without having @vs@ you'd have a hard time convincing GHC that this could
 -- work.
@@ -375,35 +403,3 @@ selectProps :: forall qs ps a. (ps `HasProps` qs)
   => Refined ps a
   -> Refined qs a
 selectProps = coerce
-
-----------------------------------------------------------------------------
--- Playground
-
-data FooProp deriving (Generic)
-data GooProp deriving (Generic)
-data EeeProp deriving (Generic)
-
-instance Prop Int FooProp where
-  type PropProjection Int FooProp = Int
-  checkProp Proxy i = Right 10
-
-instance Prop Int GooProp where
-  type PropProjection Int GooProp = Int
-  checkProp Proxy i = Right 20
-
-data GreaterThan (n :: Nat) deriving (Generic)
-
-instance KnownNat n => Prop Int (GreaterThan n) where
-  type PropProjection Int (GreaterThan n) = Int
-  checkProp Proxy i =
-    if i > fromIntegral (natVal (Proxy :: Proxy n))
-      then Right i
-      else Left "Not your day"
-
-instance CmpNat n m ~ GT => Axiom "weaken_gt" '[V n, V m] '[GreaterThan n] (GreaterThan m)
-
-r :: Refined '[GreaterThan 5] Int
-r = assumeProps @'[GreaterThan 5] (refined 10)
-
-rrr :: Refined '[GreaterThan 3, GreaterThan 5] Int
-rrr = applyAxiom @"weaken_gt" @'[V 5, V 3] r
