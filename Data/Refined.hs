@@ -217,6 +217,7 @@ type family HasProps (ps :: [*]) (qs :: [*]) :: Constraint where
 -- @p@.
 
 type family ProjectionProps (ps :: [*]) (p :: *)  :: [*] where
+  ProjectionProps ps (t `Via` p) = ProjectionProps (ProjectionProps ps p) t
   ProjectionProps '[] p = '[]
   ProjectionProps ((t `Via` p) ': ps) p = t ': ProjectionProps ps p
   ProjectionProps (x ': ps) p = ProjectionProps ps p
