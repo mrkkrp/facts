@@ -42,8 +42,8 @@ module Data.Refined
     -- * 'Prop'erties
   , Prop (..)
   , IdProp
+  , PropName
   , AddProp
-  , AddProps
   , HasProp
   , HasProps
   , ProjectionProps
@@ -211,12 +211,6 @@ type family HasProp (ps :: [*]) (p :: *) :: Constraint where
   HasProp (p ': ps) p = ()
   HasProp (b ': ps) p = HasProp ps p
 
--- | Like 'AppProp' but for many properties at once.
-
-type family AddProps (ps :: [*]) (qs :: [*]) :: [*] where
-  AddProps ps '[] = ps
-  AddProps ps (q ': qs) = AddProps (AddProp ps q) qs
-
 -- | Like 'HasProp' but for many properties at once.
 
 type family HasProps (ps :: [*]) (qs :: [*]) :: Constraint where
@@ -254,7 +248,7 @@ estPropThrow
   -> m (Refined (ps `AddProp` q) a)
 estPropThrow = either throwM return . probeProp @q
 
--- | Establish properties in a 'MonadFail' instance.
+-- | Establish a property in a 'MonadFail' instance.
 
 estPropFail
   :: forall q ps m a. ( Prop a q
@@ -265,7 +259,7 @@ estPropFail
   -> m (Refined (ps `AddProp` q) a)
 estPropFail = either (Fail.fail . displayException) return . probeProp @q
 
--- | Establish properties in a 'MonadError' instance.
+-- | Establish a property in a 'MonadError' instance.
 
 estPropError
   :: forall q ps m a. ( Prop a q
@@ -275,6 +269,8 @@ estPropError
   => Refined ps a
   -> m (Refined (ps `AddProp` q) a)
 estPropError = either throwError return . probeProp @q
+
+-- | Establish a property at copmile time using Template Haskell.
 
 estPropTH
   :: forall q ps a. ( Prop a q
