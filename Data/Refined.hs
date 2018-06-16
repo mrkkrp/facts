@@ -289,7 +289,10 @@ estPropTH x = estPropFail @q x >>= TH.lift
 -- | Check if a property holds and return error message if it doesn't.
 
 probeProp
-  :: forall q ps a. (Prop a q, KnownSymbol (PropName q))
+  :: forall q ps a. ( Prop a q
+                    , KnownSymbol (PropName q)
+                    , HasCallStack
+                    )
   => Refined ps a
   -> Either RefinedException (Refined (ps `AddProp` q) a)
 probeProp (Refined a) =
