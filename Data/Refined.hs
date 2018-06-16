@@ -151,8 +151,8 @@ class (Show a, Generic p) => Prop a p where
 
 data IdProp deriving Generic
 
--- | Every type has the identity property which allows to treat that type as
--- well… that type.
+-- | Every type has the identity property which allows us to treat that type
+-- as well… that type.
 
 instance Show a => Prop a IdProp where
   type PropProjection a IdProp = a
@@ -335,9 +335,9 @@ instance Exception RefinedException where
 
 -- | 'Via' is the composition in the category of refined types.
 --
--- 'Via' is of great utility as it allows to prove properties about values
--- of refined types that are obtainable by following a property morphism,
--- not just values we currently have.
+-- 'Via' is of great utility as it allows us to prove properties about
+-- values of refined types that are obtainable by following a property
+-- morphism, not just values we currently have.
 --
 -- For example, having a @'Refined' '[] Text@ value we could demand that it
 -- has the property @GreaterThan 5 'Via' Length@:
@@ -356,9 +356,9 @@ instance Exception RefinedException where
 -- > rLength :: Refined '[GreaterThan 5] Int
 -- > rLength = followProp @Length rText1
 --
--- It also allows to state 'Axiom's (see below) that talk about properties
--- of “connected” types. Without 'Via', 'Axiom's could only talk about
--- relations between properties of the same type.
+-- It also allows us to state 'Axiom's (see below) that talk about
+-- properties of “connected” types. Without 'Via', 'Axiom's could only talk
+-- about relations between properties of the same type.
 
 data (t :: *) `Via` (p :: *) deriving Generic
 
@@ -387,7 +387,7 @@ followProp (Refined a) =
 ----------------------------------------------------------------------------
 -- Deducing properties
 
--- | An @'Axiom' name vs qs p@ allows to prove property @p@ if properties
+-- | An @'Axiom' name vs qs p@ allows us to prove property @p@ if properties
 -- @qs@ are already proven. @name@ and arguments @vs@ determine both @qs@
 -- and @p@.
 --
