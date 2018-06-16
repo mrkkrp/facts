@@ -163,9 +163,17 @@ instance Axiom "id_prop" '[] '[] IdProp
 
 instance Axiom "id_prop_pre" '[a] '[a] (a `Via` IdProp)
 
+-- | Pre-composition of 'IdProp' can be dropped.
+
+instance Axiom "id_prop_pre'" '[a] '[a `Via` IdProp] a
+
 -- | An existing prperty can be post-composed with 'IdProp'.
 
 instance Axiom "id_prop_post" '[a] '[a] (IdProp `Via` a)
+
+-- | Post-composition of 'IdProp' can be dropped.
+
+instance Axiom "id_prop_post'" '[a] '[IdProp `Via` a] a
 
 -- | Obtain a name of property type as a type of the kind 'Symbol'.
 
