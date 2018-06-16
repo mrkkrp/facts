@@ -10,6 +10,10 @@ This is a library for working with refined types in Haskell. Please refer to
 the Haddock for more information as I'm still working on how to present the
 ideas in it to people.
 
+Here is a blog post that announces the library:
+
+* https://markkarpov.com/post/smart-constructors-that-cannot-fail.html
+
 ## Contribution
 
 Please kindly direct all issues, bugs, and questions to [the GitHub issue
