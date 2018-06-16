@@ -337,7 +337,7 @@ instance Exception RefinedException where
 -- not values we currently have. It also allows to state 'Axiom's (see
 -- below) that talk about properties of “connected” types. Without 'Via',
 -- 'Axiom's could only talk about relations between properties of the same
--- type type.
+-- type.
 
 data (t :: *) `Via` (p :: *) deriving Generic
 
