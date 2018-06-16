@@ -240,7 +240,7 @@ assumeProp
   :: forall q ps a. (Prop a q)
   => Refined ps a
   -> Refined (ps `AddProp` q) a
-assumeProp = undefined
+assumeProp = coerce
 
 -- | Establish a property in 'MonadThrow'.
 
