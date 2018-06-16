@@ -60,6 +60,7 @@ module Data.Refined
   , selectProps )
 where
 
+import Control.Monad
 import Control.Monad.Catch (Exception (..), MonadThrow (..))
 import Control.Monad.Except (MonadError (..))
 import Data.Coerce
@@ -365,9 +366,8 @@ instance (Prop (PropProjection a p) t, Prop a p) => Prop a (t `Via` p) where
 
   type PropProjection a (t `Via` p) = PropProjection (PropProjection a p) t
 
-  checkProp Proxy a =
-    checkProp (Proxy :: Proxy p) a >>=
-    checkProp (Proxy :: Proxy t)
+  checkProp Proxy =
+    checkProp (Proxy :: Proxy p) >=> checkProp (Proxy :: Proxy t)
 
 infixl 5 `Via`
 
