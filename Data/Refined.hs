@@ -102,7 +102,9 @@ unrefined (Refined a) = a
 -- Properties
 
 -- | @'Prop' a p@ is a type class for @a@ things that can have @p@ property.
--- Properties are morphisms in the category of refined types.
+-- Properties are morphisms in the category of refined types. (That category
+-- is the Kleisli category of the @'Either' 'String'@ monad as it seems to
+-- happen here.)
 
 class (Show a, Generic p) => Prop a p where
 
@@ -242,7 +244,7 @@ assumeProp
   -> Refined (ps `AddProp` q) a
 assumeProp = coerce
 
--- | Establish a property in 'MonadThrow'.
+-- | Establish a property in a 'MonadThrow' instance.
 
 estPropThrow
   :: forall q ps m a. ( Prop a q
@@ -275,7 +277,7 @@ estPropError
   -> m (Refined (ps `AddProp` q) a)
 estPropError = either throwError return . probeProp @q
 
--- | Establish a property at copmile time using Template Haskell.
+-- | Establish a property at compile time using Template Haskell.
 
 estPropTH
   :: forall q ps a. ( Prop a q
@@ -333,11 +335,29 @@ instance Exception RefinedException where
 -- | 'Via' is the composition in the category of refined types.
 --
 -- 'Via' is of great utility as it allows to prove properties about values
--- of refined types that are obtainable by following a proprety morphism,
--- not values we currently have. It also allows to state 'Axiom's (see
--- below) that talk about properties of “connected” types. Without 'Via',
--- 'Axiom's could only talk about relations between properties of the same
--- type.
+-- of refined types that are obtainable by following a property morphism,
+-- not just values we currently have.
+--
+-- For example, having a @'Refined' '[] Text@ value we could demand that it
+-- has the property @GreaterThan 5 'Via' Length@:
+--
+-- > rText0 :: Refined '[] Text
+-- > rText0 = refined "foobar"
+-- >
+-- > -- In real programs use 'estMonadThrow' or similar, don't just blindly
+-- > -- assume things!
+-- > rText1 :: Refined '[GreaterThan 5 `Via` Length]
+-- > rText1 = assumeProp @(GreaterThan 5 `Via` Length) rText0
+--
+-- Then we could “follow” the @Length@ property with 'followProp' (see
+-- below) to get @Refined '[GreaterThan 5] Int@:
+--
+-- > rLength :: Refined '[GreaterThan 5] Int
+-- > rLength = followProp @Length rText1
+--
+-- It also allows to state 'Axiom's (see below) that talk about properties
+-- of “connected” types. Without 'Via', 'Axiom's could only talk about
+-- relations between properties of the same type.
 
 data (t :: *) `Via` (p :: *) deriving Generic
 
@@ -366,11 +386,6 @@ followProp (Refined a) =
 
 ----------------------------------------------------------------------------
 -- Deducing properties
-
--- | A helper wrapper to help us construct heterogeneous type-level lists
--- with respect to kinds of elements.
-
-data V (a :: k)
 
 -- | An @'Axiom' name vs qs p@ allows to prove property @p@ if properties
 -- @qs@ are already proven. @name@ and arguments @vs@ determine both @qs@
@@ -403,6 +418,11 @@ data V (a :: k)
 -- impossible.
 
 class Axiom (name :: Symbol) (vs :: [*]) (qs :: [*]) (p :: *) | name vs -> qs p
+
+-- | A helper wrapper to help us construct heterogeneous type-level lists
+-- with respect to kinds of elements.
+
+data V (a :: k)
 
 -- | Apply 'Axiom' and deduce a new property.
 
