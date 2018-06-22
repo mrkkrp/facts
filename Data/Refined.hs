@@ -83,7 +83,7 @@ import qualified Language.Haskell.TH.Syntax as TH
 newtype Refined (ps :: [*]) a = Refined a
   deriving (Eq, Ord, Show, Typeable)
 
-type role Refined phantom representational
+type role Refined phantom nominal
 
 instance TH.Lift a => TH.Lift (Refined ps a) where
   lift (Refined a) = [| Refined a |]
